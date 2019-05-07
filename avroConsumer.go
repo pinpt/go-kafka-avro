@@ -2,11 +2,12 @@ package kafka
 
 import (
 	"encoding/binary"
+	"os"
+	"os/signal"
+
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
 	"github.com/linkedin/goavro"
-	"os"
-	"os/signal"
 )
 
 type avroConsumer struct {
@@ -93,10 +94,10 @@ func (ac *avroConsumer) Consume() {
 				if err != nil {
 					ac.callbacks.OnError(err)
 				}
-				ac.Consumer.MarkOffset(m, "")
 				if ac.callbacks.OnDataReceived != nil {
 					ac.callbacks.OnDataReceived(msg)
 				}
+				ac.Consumer.MarkOffset(m, "")
 			}
 		case <-signals:
 			return
