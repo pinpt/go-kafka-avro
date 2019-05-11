@@ -14,6 +14,7 @@ type avroConsumer struct {
 	Consumer             *cluster.Consumer
 	SchemaRegistryClient *CachedSchemaRegistryClient
 	callbacks            ConsumerCallbacks
+	config               *cluster.Config
 }
 
 type ConsumerCallbacks struct {
@@ -31,15 +32,19 @@ type Message struct {
 	Value     string
 }
 
-// avroConsumer is a basic consumer to interact with schema registry, avro and kafka
-func NewAvroConsumer(kafkaServers []string, schemaRegistryServers []string,
-	topic string, groupId string, callbacks ConsumerCallbacks) (*avroConsumer, error) {
-	// init (custom) config, enable errors and notifications
+func NewDefaultConfig() *cluster.Config {
 	config := cluster.NewConfig()
 	config.Consumer.Return.Errors = true
 	config.Group.Return.Notifications = true
 	//read from beginning at the first time
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
+	return config
+}
+
+// NewAvroConsumerWithConfig returns a basic consumer to interact with schema registry, avro and kafka and uses the passed in config
+func NewAvroConsumerWithConfig(kafkaServers []string, schemaRegistryServers []string,
+	topic string, groupId string, callbacks ConsumerCallbacks, config *cluster.Config) (*avroConsumer, error) {
+	// init (custom) config, enable errors and notifications
 	topics := []string{topic}
 	consumer, err := cluster.NewConsumer(kafkaServers, groupId, topics, config)
 	if err != nil {
@@ -51,7 +56,15 @@ func NewAvroConsumer(kafkaServers []string, schemaRegistryServers []string,
 		consumer,
 		schemaRegistryClient,
 		callbacks,
+		config,
 	}, nil
+}
+
+// NewAvroConsumer returns a basic consumer to interact with schema registry, avro and kafka
+func NewAvroConsumer(kafkaServers []string, schemaRegistryServers []string,
+	topic string, groupId string, callbacks ConsumerCallbacks) (*avroConsumer, error) {
+	// init (custom) config, enable errors and notifications
+	return NewAvroConsumerWithConfig(kafkaServers, schemaRegistryServers, topic, groupId, callbacks, NewDefaultConfig())
 }
 
 //GetSchemaId get schema id from schema-registry service
@@ -68,23 +81,27 @@ func (ac *avroConsumer) Consume() {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 
-	// consume errors
-	go func() {
-		for err := range ac.Consumer.Errors() {
-			if ac.callbacks.OnError != nil {
-				ac.callbacks.OnError(err)
+	if ac.config.Consumer.Return.Errors {
+		// consume errors
+		go func() {
+			for err := range ac.Consumer.Errors() {
+				if ac.callbacks.OnError != nil {
+					ac.callbacks.OnError(err)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
-	// consume notifications
-	go func() {
-		for notification := range ac.Consumer.Notifications() {
-			if ac.callbacks.OnNotification != nil {
-				ac.callbacks.OnNotification(notification)
+	if ac.config.Group.Return.Notifications {
+		// consume notifications
+		go func() {
+			for notification := range ac.Consumer.Notifications() {
+				if ac.callbacks.OnNotification != nil {
+					ac.callbacks.OnNotification(notification)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	for {
 		select {
@@ -93,9 +110,10 @@ func (ac *avroConsumer) Consume() {
 				msg, err := ac.ProcessAvroMsg(m)
 				if err != nil {
 					ac.callbacks.OnError(err)
-				}
-				if ac.callbacks.OnDataReceived != nil {
-					ac.callbacks.OnDataReceived(msg)
+				} else {
+					if ac.callbacks.OnDataReceived != nil {
+						ac.callbacks.OnDataReceived(msg)
+					}
 				}
 				ac.Consumer.MarkOffset(m, "")
 			}
