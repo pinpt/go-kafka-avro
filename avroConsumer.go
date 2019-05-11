@@ -145,6 +145,6 @@ func (ac *avroConsumer) ProcessAvroMsg(m *sarama.ConsumerMessage) (Message, erro
 	return msg, nil
 }
 
-func (ac *avroConsumer) Close() {
-	ac.Consumer.Close()
+func (ac *avroConsumer) Close() error {
+	return ac.Consumer.Close()
 }
