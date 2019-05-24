@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/bsm/sarama-cluster"
@@ -30,6 +31,9 @@ type Message struct {
 	Offset    int64
 	Key       string
 	Value     string
+
+	Headers   map[string]string
+	Timestamp time.Time // only set if kafka is version 0.10+, inner message timestamp
 }
 
 func NewDefaultConfig() *cluster.Config {
@@ -141,7 +145,13 @@ func (ac *avroConsumer) ProcessAvroMsg(m *sarama.ConsumerMessage) (Message, erro
 	if err != nil {
 		return Message{}, err
 	}
-	msg := Message{int(schemaId), m.Topic, m.Partition, m.Offset, string(m.Key), string(textual)}
+	msg := Message{int(schemaId), m.Topic, m.Partition, m.Offset, string(m.Key), string(textual), nil, m.Timestamp}
+	if m.Headers != nil {
+		msg.Headers = make(map[string]string)
+		for _, v := range m.Headers {
+			msg.Headers[string(v.Key)] = string(v.Value)
+		}
+	}
 	return msg, nil
 }
 
